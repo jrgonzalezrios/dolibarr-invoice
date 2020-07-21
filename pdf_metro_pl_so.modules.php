@@ -26,12 +26,12 @@
  */
 
 /**
- *	\file       htdocs/core/modules/facture/doc/pdf_metro.modules.php
- *	\ingroup    facture
- *	\brief      File of class to generate customers invoices from metro model
+ *	\file       htdocs/core/modules/commande/doc/pdf_einstein.modules.php
+ *	\ingroup    commande
+ *	\brief      File of Class to generate PDF orders with template Einstein
  */
 
-require_once DOL_DOCUMENT_ROOT.'/core/modules/facture/modules_facture.php';
+require_once DOL_DOCUMENT_ROOT.'/core/modules/commande/modules_commande.php';
 require_once DOL_DOCUMENT_ROOT.'/product/class/product.class.php';
 require_once DOL_DOCUMENT_ROOT.'/core/lib/company.lib.php';
 require_once DOL_DOCUMENT_ROOT.'/core/lib/functions2.lib.php';
@@ -41,7 +41,7 @@ require_once DOL_DOCUMENT_ROOT.'/core/lib/pdf.lib.php';
 /**
  *	Class to generate the customer invoice PDF with template Crabe
  */
-class pdf_metro extends ModelePDFFactures
+class pdf_metro_pl_so extends ModelePDFCommandes
 {
      /**
      * @var DoliDb Database handler
@@ -145,7 +145,7 @@ class pdf_metro extends ModelePDFFactures
 		$langs->loadLangs(array("main", "bills"));
 
 		$this->db = $db;
-		$this->name = "metro";
+		$this->name = "packing_list_so";
 		$this->description = $langs->trans('PDFCrabeDescription');
 		$this->update_main_doc_field = 1; // Save the name of generated file as the main doc when generating a doc with this template
 
@@ -177,27 +177,30 @@ class pdf_metro extends ModelePDFFactures
 		$this->emetteur = $mysoc;
 		if (empty($this->emetteur->country_code)) $this->emetteur->country_code = substr($langs->defaultlang, -2); // By default, if was not defined
 
+		//Set to use units in this PDF
+		$this->use_units = 1;
+
 		// Define position of columns
 		$this->posxdesc = $this->marge_gauche + 1;
-		if (!empty($conf->global->PRODUCT_USE_UNITS))
+		if (!empty($this->use_units))
 		{
 			$this->posxtva = 101;
-			$this->posxup = 118;
-			$this->posxqty = 135;
-			$this->posxunit = 151;
+			$this->posxup = 121;
+			$this->posxqty = 141;
+			$this->posxunit = 161;
 		}
 		else
 		{
 			$this->posxtva = 110;
 			$this->posxup = 126;
 			$this->posxqty = 145;
-			$this->posxunit = 162;
+			$this->posxunit = 165;
 		}
 		$this->posxprogress = 151; // Only displayed for situation invoices
-		$this->posxdiscount = 162;
+		$this->posxdiscount = 181;
 		$this->posxprogress = 174;
-		$this->postotalht = 174;
-		$this->posxbrand = 162;
+		$this->postotalht = 181;
+		$this->posxbrand = 165;
 		if (!empty($conf->global->MAIN_GENERATE_DOCUMENTS_WITHOUT_VAT) || !empty($conf->global->MAIN_GENERATE_DOCUMENTS_WITHOUT_VAT_COLUMN)) $this->posxtva = $this->posxup;
 		$this->posxpicture = $this->posxtva - (empty($conf->global->MAIN_DOCUMENTS_WITH_PICTURE_WIDTH) ? 20 : $conf->global->MAIN_DOCUMENTS_WITH_PICTURE_WIDTH); // width of images
 		if ($this->page_largeur < 210) // To work with US executive format
@@ -238,59 +241,24 @@ class pdf_metro extends ModelePDFFactures
     public function write_file($object, $outputlangs, $srctemplatepath = '', $hidedetails = 0, $hidedesc = 0, $hideref = 0)
 	{
         // phpcs:enable
-		global $user, $langs, $conf, $mysoc, $hookmanager, $nblines;
+		global $user, $langs, $conf, $mysoc, $db, $hookmanager, $nblines;
 
-		dol_syslog("write_file outputlangs->defaultlang=".(is_object($outputlangs) ? $outputlangs->defaultlang : 'null'));
-
-		if (!is_object($outputlangs)) $outputlangs = $langs;
+		if (! is_object($outputlangs)) $outputlangs=$langs;
 		// For backward compatibility with FPDF, force output charset to ISO, because FPDF expect text to be encoded in ISO
-		if (!empty($conf->global->MAIN_USE_FPDF)) $outputlangs->charset_output = 'ISO-8859-1';
+		if (! empty($conf->global->MAIN_USE_FPDF)) $outputlangs->charset_output='ISO-8859-1';
 
 		// Load translation files required by the page
-		$outputlangs->loadLangs(array("main", "bills", "products", "dict", "companies"));
+		$outputlangs->loadLangs(array("main", "dict", "companies", "bills", "products", "orders", "deliveries"));
 
 		$nblines = count($object->lines);
-
-		// Loop on each lines to detect if there is at least one image to show
-		$realpatharray = array();
-		if (!empty($conf->global->MAIN_GENERATE_INVOICES_WITH_PICTURE))
-		{
-			for ($i = 0; $i < $nblines; $i++)
-			{
-				if (empty($object->lines[$i]->fk_product)) continue;
-
-				$objphoto = new Product($this->db);
-				$objphoto->fetch($object->lines[$i]->fk_product);
-
-				$pdir = get_exdir($object->lines[$i]->fk_product, 2, 0, 0, $objphoto, 'product').$object->lines[$i]->fk_product."/photos/";
-				$dir = $conf->product->dir_output.'/'.$pdir;
-
-				$realpath = '';
-				foreach ($objphoto->liste_photos($dir, 1) as $key => $obj)
-				{
-					$filename = $obj['photo'];
-					//if ($obj['photo_vignette']) $filename='thumbs/'.$obj['photo_vignette'];
-					$realpath = $dir.$filename;
-					break;
-				}
-
-				if ($realpath) $realpatharray[$i] = $realpath;
-			}
-		}
-		if (count($realpatharray) == 0) $this->posxpicture = $this->posxtva;
-
-		if ($conf->facture->dir_output)
+		if ($conf->commande->dir_output)
 		{
 			$object->fetch_thirdparty();
-
-			$deja_regle = $object->getSommePaiement(($conf->multicurrency->enabled && $object->multicurrency_tx != 1) ? 1 : 0);
-			$amount_credit_notes_included = $object->getSumCreditNotesUsed(($conf->multicurrency->enabled && $object->multicurrency_tx != 1) ? 1 : 0);
-			$amount_deposits_included = $object->getSumDepositsUsed(($conf->multicurrency->enabled && $object->multicurrency_tx != 1) ? 1 : 0);
 
 			// Definition of $dir and $file
 			if ($object->specimen)
 			{
-				$dir = $conf->facture->dir_output;
+				$dir = $conf->commande->multidir_output[$conf->entity];
 				$file = $dir."/SPECIMEN.pdf";
 			}
 			else
@@ -298,16 +266,13 @@ class pdf_metro extends ModelePDFFactures
 				$clientPO = $object->array_options['options_cpo']?$object->array_options['options_cpo']:($object->ref_client?$object->ref_client:"[PO]");
 				$clientPO = trim($clientPO);
 				$objectref = dol_sanitizeFileName($object->ref);
-				$dir = $conf->facture->dir_output."/".$objectref;
-				$tpAlias = $object->thirdparty->name_alias?$object->thirdparty->name_alias:"[]";
-				if ($object->statut == Facture::STATUS_DRAFT)
-				{
-					$objectref = "-";
-				}else{
-					$objectref = dol_sanitizeFileName($object->ref);
-				}
+				$dir = $conf->commande->multidir_output[$object->entity] . "/" . $objectref;
+				$tpAlias = $object->thirdparty->name_alias?$object->thirdparty->name_alias:"[]";				
+				
+				$objectref = "-";
 				$lineName = trim($object->array_options['options_line']);
-				$file = $dir."/".$tpAlias ." ".$objectref." ". $lineName ." PO#".$clientPO.".pdf";
+				
+				$file = $dir."/".$tpAlias ." ".$objectref." ". $lineName ." PO#".$clientPO." PL.pdf";
 			}
 			if (!file_exists($dir))
 			{
@@ -321,29 +286,25 @@ class pdf_metro extends ModelePDFFactures
 			if (file_exists($dir))
 			{
 				// Add pdfgeneration hook
-				if (!is_object($hookmanager))
+				if (! is_object($hookmanager))
 				{
 					include_once DOL_DOCUMENT_ROOT.'/core/class/hookmanager.class.php';
-					$hookmanager = new HookManager($this->db);
+					$hookmanager=new HookManager($this->db);
 				}
 				$hookmanager->initHooks(array('pdfgeneration'));
-				$parameters = array('file'=>$file, 'object'=>$object, 'outputlangs'=>$outputlangs);
+				$parameters=array('file'=>$file,'object'=>$object,'outputlangs'=>$outputlangs);
 				global $action;
-				$reshook = $hookmanager->executeHooks('beforePDFCreation', $parameters, $object, $action); // Note that $action and $object may have been modified by some hooks
-
-				// Set nblines with the new facture lines content after hook
-				$nblines = count($object->lines);
-				$nbpayments = count($object->getListOfPayments());
+				$reshook=$hookmanager->executeHooks('beforePDFCreation', $parameters, $object, $action);    // Note that $action and $object may have been modified by some hooks
 
 				// Create pdf instance
-				$pdf = pdf_getInstance($this->format);
-                $default_font_size = pdf_getPDFFontSize($outputlangs); // Must be after pdf_getInstance
-                $pdf->SetAutoPageBreak(1, 0);
+				$pdf=pdf_getInstance($this->format);
+				$default_font_size = pdf_getPDFFontSize($outputlangs);	// Must be after pdf_getInstance
+				$pdf->SetAutoPageBreak(1, 0);
 
-                $heightforinfotot = 50 + (4 * $nbpayments); // Height reserved to output the info and total part and payment part
-		        $heightforfreetext = (isset($conf->global->MAIN_PDF_FREETEXT_HEIGHT) ? $conf->global->MAIN_PDF_FREETEXT_HEIGHT : 5); // Height reserved to output the free text on last page
-	            $heightforfooter = $this->marge_basse + 8; // Height reserved to output the footer (value include bottom margin)
-	            if ($conf->global->MAIN_GENERATE_DOCUMENTS_SHOW_FOOT_DETAILS > 0) $heightforfooter += 6;
+				$heightforinfotot = 40;	// Height reserved to output the info and total part
+		        $heightforfreetext= (isset($conf->global->MAIN_PDF_FREETEXT_HEIGHT)?$conf->global->MAIN_PDF_FREETEXT_HEIGHT:5);	// Height reserved to output the free text on last page
+	            $heightforfooter = $this->marge_basse + 8;	// Height reserved to output the footer (value include bottom margin)
+	            if ($conf->global->MAIN_GENERATE_DOCUMENTS_SHOW_FOOT_DETAILS >0) $heightforfooter+= 6;
 
                 if (class_exists('TCPDF'))
                 {
@@ -351,12 +312,11 @@ class pdf_metro extends ModelePDFFactures
                     $pdf->setPrintFooter(false);
                 }
                 $pdf->SetFont(pdf_getPDFFont($outputlangs));
-
                 // Set path to the background PDF File
-                if (!empty($conf->global->MAIN_ADD_PDF_BACKGROUND))
+                if (! empty($conf->global->MAIN_ADD_PDF_BACKGROUND))
                 {
                 	$pagecount = $pdf->setSourceFile($conf->mycompany->multidir_output[$object->entity].'/'.$conf->global->MAIN_ADD_PDF_BACKGROUND);
-				    $tplidx = $pdf->importPage(1);
+                    $tplidx = $pdf->importPage(1);
                 }
 
 				$pdf->Open();
@@ -373,25 +333,8 @@ class pdf_metro extends ModelePDFFactures
 				$pdf->SetMargins($this->marge_gauche, $this->marge_haute, $this->marge_droite); // Left, Top, Right
 
 				// Set $this->atleastonediscount if you have at least one discount
-				for ($i = 0; $i < $nblines; $i++)
-				{
-					if ($object->lines[$i]->remise_percent)
-					{
-						$this->atleastonediscount++;
-					}
-					// Set $this->atleastonebrand if you have at least one brand
-					require_once (DOL_DOCUMENT_ROOT."/product/class/product.class.php");
-					$product = new Product($this->db);
-					$product->fetch($object->lines[$i]->fk_product);
-					$extrafields_product = new ExtraFields($this->db);
-					$extralabels_product = $extrafields_product->fetch_name_optionals_label($product->table_element);
-					$product->fetch_optionals($product->rowid, $extralabels_product);
-					
-					$prdBrand = $outputlangs->convToOutputCharset($product->array_options['options_brand']);
-					if(!empty($prdBrand)){
-						$this->atleastonebrand++;
-					}
-				}
+				
+				$this->atleastonediscount = null;
 				if (empty($this->atleastonediscount))    // retreive space not used by discount
 				{
 				    $delta = ($this->posxprogress - $this->posxdiscount);
@@ -494,20 +437,10 @@ class pdf_metro extends ModelePDFFactures
 				// Loop on each lines
 				for ($i = 0; $i < $nblines; $i++)
 				{
-					if ($object->lines[$i]->fk_product)
-					{
-						require_once (DOL_DOCUMENT_ROOT."/product/class/product.class.php");
-						$product = new Product($this->db);
-						$product->fetch($object->lines[$i]->fk_product);
-
-						$extrafields_product = new ExtraFields($this->db);
-						$extralabels_product = $extrafields_product->fetch_name_optionals_label($product->table_element);
-
-						$product->fetch_optionals($product->rowid, $extralabels_product);
-						
-						$outputlangs->convToOutputCharset($product->array_options['options_brand']);
+					//only for products not services
+					if($object->lines[$i]->product_type == 1){
+						continue;
 					}
-					
 					$curY = $nexY;
 					$pdf->SetFont('', '', $default_font_size - 1); // Into loop to work with multipage
 					$pdf->SetTextColor(0, 0, 0);
@@ -613,22 +546,45 @@ class pdf_metro extends ModelePDFFactures
 						$pdf->SetXY($this->posxtva - 5, $curY);
 						$pdf->MultiCell($this->posxup - $this->posxtva + 4, 3, $vat_rate, 0, 'R');
 					}
-					// Quantity
-					$qty = pdf_getlineqty($object, $i, $outputlangs, $hidedetails);					
-					$pdf->SetXY($this->posxup, $curY);
-					$pdf->MultiCell($this->posxqty - $this->posxup - 0.8, 3, $qty, 0, 'R', 0);
 
-					// Unit price before discount
+					$product = new Product($this->db);
+					$product->fetch($object->lines[$i]->fk_product);
+					
+					$extrafields_product = new ExtraFields($this->db);
+					$extralabels_product = $extrafields_product->fetch_name_optionals_label($product->table_element);
+					
+					//$product->fetch_optionals($product->rowid, $extralabels_product);
+					$casePack = $outputlangs->convToOutputCharset($product->array_options['options_cpk']);
+
+					// PCS
+					$qty = pdf_getlineqty($object, $i, $outputlangs, $hidedetails);
+					
+					$pdf->SetXY($this->posxup, $curY);
+					$isInPieces = $object->array_options['options_inpcs'];
+					if($isInPieces){
+						$pdf->MultiCell($this->posxqty - $this->posxup - 0.8, 3, $qty, 0, 'R', 0);
+					}else if(!$isInPieces && $casePack > 1){
+						$pdf->MultiCell($this->posxqty - $this->posxup - 0.8, 3, $qty * $casePack, 0, 'R', 0);
+					}else{
+						$pdf->MultiCell($this->posxqty - $this->posxup - 0.8, 3, "", 0, 'R', 0);
+					}
+
+					// Empty PCS					
 					$up_excl_tax = pdf_getlineupexcltax($object, $i, $outputlangs, $hidedetails);
 					$pdf->SetXY($this->posxqty, $curY);
-					$pdf->MultiCell($this->posxunit - $this->posxqty - 0.8, 4, $up_excl_tax, 0, 'R'); // Enough for 6 chars
+					$pdf->MultiCell($this->posxunit - $this->posxqty - 0.8, 4, "", 0, 'R'); // Enough for 6 chars					
 
-					// Unit
-					if (!empty($conf->global->PRODUCT_USE_UNITS))
-					{
-						$unit = pdf_getlineunit($object, $i, $outputlangs, $hidedetails, $hookmanager);
+					// Case Pack 
+					if (!empty($this->use_units))
+					{						
 						$pdf->SetXY($this->posxunit, $curY);
-						$pdf->MultiCell($this->posxdiscount - $this->posxunit - 0.8, 4, $unit, 0, 'L');
+						if ($casePack > 1 && $isInPieces){
+							$pdf->MultiCell($this->posxdiscount - $this->posxunit - 0.8, 4, $qty / $casePack, 0, 'L');
+						}if ($casePack > 1 && !$isInPieces){
+							$pdf->MultiCell($this->posxdiscount - $this->posxunit - 0.8, 4, $qty, 0, 'L');
+						}else{
+							$pdf->MultiCell($this->posxdiscount - $this->posxunit - 0.8, 4, "", 0, 'L');
+						}
 					}
 
 					// Discount on line
@@ -647,37 +603,11 @@ class pdf_metro extends ModelePDFFactures
 				        $pdf->MultiCell($this->postotalht - $this->posxprogress + 1, 3, $progress, 0, 'R');
 					}
 
-					// Total HT line
+					// Empty Case pack
 					$total_excl_tax = pdf_getlinetotalexcltax($object, $i, $outputlangs, $hidedetails);
 					$pdf->SetXY($this->postotalht, $curY);
-					$pdf->MultiCell($this->page_largeur - $this->marge_droite - $this->postotalht, 3, $total_excl_tax, 0, 'R', 0);
+					$pdf->MultiCell($this->page_largeur - $this->marge_droite - $this->postotalht, 3, "", 0, 'R', 0);
 
-
-					$sign = 1;
-					if (isset($object->type) && $object->type == 2 && !empty($conf->global->INVOICE_POSITIVE_CREDIT_NOTE)) $sign = -1;
-					// Collection of totals by value of VAT in $this->tva["taux"]=total_tva
-					$prev_progress = $object->lines[$i]->get_prev_progress($object->id);
-					if ($prev_progress > 0 && !empty($object->lines[$i]->situation_percent)) // Compute progress from previous situation
-					{
-						if ($conf->multicurrency->enabled && $object->multicurrency_tx != 1) $tvaligne = $sign * $object->lines[$i]->multicurrency_total_tva * ($object->lines[$i]->situation_percent - $prev_progress) / $object->lines[$i]->situation_percent;
-						else $tvaligne = $sign * $object->lines[$i]->total_tva * ($object->lines[$i]->situation_percent - $prev_progress) / $object->lines[$i]->situation_percent;
-					} else {
-						if ($conf->multicurrency->enabled && $object->multicurrency_tx != 1) $tvaligne = $sign * $object->lines[$i]->multicurrency_total_tva;
-						else $tvaligne = $sign * $object->lines[$i]->total_tva;
-					}
-
-					$localtax1ligne = $object->lines[$i]->total_localtax1;
-					$localtax2ligne = $object->lines[$i]->total_localtax2;
-					$localtax1_rate = $object->lines[$i]->localtax1_tx;
-					$localtax2_rate = $object->lines[$i]->localtax2_tx;
-					$localtax1_type = $object->lines[$i]->localtax1_type;
-					$localtax2_type = $object->lines[$i]->localtax2_type;
-
-					if ($object->remise_percent) $tvaligne -= ($tvaligne * $object->remise_percent) / 100;
-					if ($object->remise_percent) $localtax1ligne -= ($localtax1ligne * $object->remise_percent) / 100;
-					if ($object->remise_percent) $localtax2ligne -= ($localtax2ligne * $object->remise_percent) / 100;
-
-					$vatrate = (string) $object->lines[$i]->tva_tx;
 
 					// Retrieve type from database for backward compatibility with old records
 					if ((!isset($localtax1_type) || $localtax1_type == '' || !isset($localtax2_type) || $localtax2_type == '') // if tax type not defined
@@ -762,7 +692,7 @@ class pdf_metro extends ModelePDFFactures
 				}
 
 				// Display info area
-				$posy = $this->_tableau_info($pdf, $object, $bottomlasttab, $outputlangs);
+				//$posy = $this->_tableau_info($pdf, $object, $bottomlasttab, $outputlangs);
 
 				// Display total area
 				$posy = $this->_tableau_tot($pdf, $object, $deja_regle, $bottomlasttab, $outputlangs);
@@ -770,11 +700,11 @@ class pdf_metro extends ModelePDFFactures
 				// Display Payments area
 				if (($deja_regle || $amount_credit_notes_included || $amount_deposits_included) && empty($conf->global->INVOICE_NO_PAYMENT_DETAILS))
 				{
-					$posy = $this->_tableau_versements($pdf, $object, $posy, $outputlangs, $heightforfooter);
+					//$posy = $this->_tableau_versements($pdf, $object, $posy, $outputlangs, $heightforfooter);
 				}
 
 				// Pagefoot
-				$this->_pagefoot($pdf, $object, $outputlangs);
+				//$this->_pagefoot($pdf, $object, $outputlangs);
 				if (method_exists($pdf, 'AliasNbPages')) $pdf->AliasNbPages();
 
 				$pdf->Close();
@@ -810,199 +740,6 @@ class pdf_metro extends ModelePDFFactures
 			$this->error = $langs->transnoentities("ErrorConstantNotDefined", "FAC_OUTPUTDIR");
 			return 0;
 		}
-	}
-
-
-	// phpcs:disable PEAR.NamingConventions.ValidFunctionName.ScopeNotCamelCaps
-	// phpcs:disable PEAR.NamingConventions.ValidFunctionName.PublicUnderscore
-	/**
-	 *  Show payments table
-	 *
-     *  @param	PDF			$pdf            Object PDF
-     *  @param  Object		$object         Object invoice
-     *  @param  int			$posy           Position y in PDF
-     *  @param  Translate	$outputlangs    Object langs for output
-     *  @param  int			$heightforfooter height for footer
-     *  @return int             			<0 if KO, >0 if OK
-	 */
-	protected function _tableau_versements(&$pdf, $object, $posy, $outputlangs, $heightforfooter = 0)
-	{
-        // phpcs:enable
-		global $conf;
-
-        $sign = 1;
-        if ($object->type == 2 && !empty($conf->global->INVOICE_POSITIVE_CREDIT_NOTE)) $sign = -1;
-
-		$current_page = $pdf->getPage();
-        $tab3_posx = 120;
-		$tab3_top = $posy + 8;
-		$tab3_width = 80;
-		$tab3_height = 4;
-		if ($this->page_largeur < 210) // To work with US executive format
-		{
-			$tab3_posx -= 20;
-		}
-
-		$default_font_size = pdf_getPDFFontSize($outputlangs);
-
-		$this->_tableau_versements_header($pdf, $object, $outputlangs, $default_font_size, $tab3_posx, $tab3_top, $tab3_width, $tab3_height);
-
-		$y = 0;
-
-		$pdf->SetFont('', '', $default_font_size - 4);
-
-
-		// Loop on each discount available (deposits and credit notes and excess of payment included)
-		$sql = "SELECT re.rowid, re.amount_ht, re.multicurrency_amount_ht, re.amount_tva, re.multicurrency_amount_tva,  re.amount_ttc, re.multicurrency_amount_ttc,";
-		$sql .= " re.description, re.fk_facture_source,";
-		$sql .= " f.type, f.datef";
-		$sql .= " FROM ".MAIN_DB_PREFIX."societe_remise_except as re, ".MAIN_DB_PREFIX."facture as f";
-		$sql .= " WHERE re.fk_facture_source = f.rowid AND re.fk_facture = ".$object->id;
-		$resql = $this->db->query($sql);
-		if ($resql)
-		{
-			$num = $this->db->num_rows($resql);
-			$i = 0;
-			$invoice = new Facture($this->db);
-			while ($i < $num)
-			{
-				$y += 3;
-				if ($tab3_top + $y >= ($this->page_hauteur - $heightforfooter))
-				{
-					$y = 0;
-					$current_page++;
-					$pdf->AddPage('', '', true);
-					if (!empty($tplidx)) $pdf->useTemplate($tplidx);
-					if (empty($conf->global->MAIN_PDF_DONOTREPEAT_HEAD)) $this->_pagehead($pdf, $object, 0, $outputlangs);
-					$pdf->setPage($current_page);
-					$this->_tableau_versements_header($pdf, $object, $outputlangs, $default_font_size, $tab3_posx, $tab3_top + $y - 3, $tab3_width, $tab3_height);
-				}
-
-				$obj = $this->db->fetch_object($resql);
-
-				if(!$obj->type == 0){
-					if ($obj->type == 2) $text = $outputlangs->transnoentities("CreditNote");
-					elseif ($obj->type == 3) $text = $outputlangs->transnoentities("Deposit");
-					elseif ($obj->type == 0) $text = $outputlangs->transnoentities("ExcessReceived");
-					else $text = $outputlangs->transnoentities("UnknownType");
-	
-					$invoice->fetch($obj->fk_facture_source);
-	
-					$pdf->SetXY($tab3_posx, $tab3_top + $y);
-					$pdf->MultiCell(20, 3, dol_print_date($this->db->jdate($obj->datef), 'day', false, $outputlangs, true), 0, 'L', 0);
-					$pdf->SetXY($tab3_posx + 21, $tab3_top + $y);
-					$pdf->MultiCell(20, 3, "$" . price(($conf->multicurrency->enabled && $object->multicurrency_tx != 1) ? $obj->multicurrency_amount_ttc : $obj->amount_ttc, 0, $outputlangs), 0, 'L', 0);
-					$pdf->SetXY($tab3_posx + 40, $tab3_top + $y);
-					$pdf->MultiCell(20, 3, $text, 0, 'L', 0);
-					$pdf->SetXY($tab3_posx + 58, $tab3_top + $y);
-					$pdf->MultiCell(20, 3, $invoice->ref, 0, 'L', 0);
-	
-					$pdf->line($tab3_posx, $tab3_top + $y + 3, $tab3_posx + $tab3_width, $tab3_top + $y + 3);
-				}
-				
-
-				$i++;
-			}
-		}
-		else
-		{
-			$this->error = $this->db->lasterror();
-			return -1;
-		}
-
-		// Loop on each payment
-		// TODO Call getListOfPaymentsgetListOfPayments instead of hard coded sql
-		$sql = "SELECT p.datep as date, p.fk_paiement, p.num_paiement as num, pf.amount as amount, pf.multicurrency_amount,";
-		$sql .= " cp.code";
-		$sql .= " FROM ".MAIN_DB_PREFIX."paiement_facture as pf, ".MAIN_DB_PREFIX."paiement as p";
-		$sql .= " LEFT JOIN ".MAIN_DB_PREFIX."c_paiement as cp ON p.fk_paiement = cp.id";
-		$sql .= " WHERE pf.fk_paiement = p.rowid AND pf.fk_facture = ".$object->id;
-		//$sql.= " WHERE pf.fk_paiement = p.rowid AND pf.fk_facture = 1";
-		$sql .= " ORDER BY p.datep";
-
-		$resql = $this->db->query($sql);
-		if ($resql)
-		{
-			$num = $this->db->num_rows($resql);
-			$i = 0;
-			while ($i < $num) {
-				$y += 3;
-				if ($tab3_top + $y >= ($this->page_hauteur - $heightforfooter))
-				{
-					$y = 0;
-					$current_page++;
-					$pdf->AddPage('', '', true);
-					if (!empty($tplidx)) $pdf->useTemplate($tplidx);
-					if (empty($conf->global->MAIN_PDF_DONOTREPEAT_HEAD)) $this->_pagehead($pdf, $object, 0, $outputlangs);
-					$pdf->setPage($current_page);
-					$this->_tableau_versements_header($pdf, $object, $outputlangs, $default_font_size, $tab3_posx, $tab3_top + $y - 3, $tab3_width, $tab3_height);
-				}
-
-				$row = $this->db->fetch_object($resql);
-
-				$pdf->SetXY($tab3_posx, $tab3_top + $y);
-				$pdf->MultiCell(20, 3, dol_print_date($this->db->jdate($row->date), 'day', false, $outputlangs, true), 0, 'L', 0);
-				$pdf->SetXY($tab3_posx + 21, $tab3_top + $y);
-				$pdf->MultiCell(20, 3, "$" .price($sign * (($conf->multicurrency->enabled && $object->multicurrency_tx != 1) ? $row->multicurrency_amount : $row->amount), 0, $outputlangs), 0, 'L', 0);
-				$pdf->SetXY($tab3_posx + 40, $tab3_top + $y);
-				$oper = $outputlangs->transnoentitiesnoconv("PaymentTypeShort".$row->code);
-
-				$pdf->MultiCell(20, 3, $oper, 0, 'L', 0);
-				$pdf->SetXY($tab3_posx + 58, $tab3_top + $y);
-				$pdf->MultiCell(30, 3, $row->num, 0, 'L', 0);
-
-				$pdf->line($tab3_posx, $tab3_top + $y + 3, $tab3_posx + $tab3_width, $tab3_top + $y + 3);
-
-				$i++;
-			}
-
-			return $tab3_top + $y + 3;
-		}
-		else
-		{
-			$this->error = $this->db->lasterror();
-			return -1;
-		}
-	}
-
-	// phpcs:disable PEAR.NamingConventions.ValidFunctionName.ScopeNotCamelCaps
-	// phpcs:disable PEAR.NamingConventions.ValidFunctionName.PublicUnderscore
-	/**
-	 * Function _tableau_versements_header
-	 *
-	 * @param TCPDF 		$pdf				Object PDF
-	 * @param Facture		$object				Object invoice
-	 * @param Translate		$outputlangs		Object langs for output
-	 * @param int			$default_font_size	Font size
-	 * @param int			$tab3_posx			pos x
-	 * @param int 			$tab3_top			pos y
-	 * @param int 			$tab3_width			width
-	 * @param int 			$tab3_height		height
-	 * @return void
-	 */
-	protected function _tableau_versements_header($pdf, $object, $outputlangs, $default_font_size, $tab3_posx, $tab3_top, $tab3_width, $tab3_height)
-	{
-	    // phpcs:enable
-	    $title = "Paiments on account";
-		if ($object->type == 2) $title = "Refunds applied";
-
-		$pdf->SetFont('', '', $default_font_size - 3);
-		$pdf->SetXY($tab3_posx, $tab3_top - 4);
-		$pdf->MultiCell(60, 3, $title, 0, 'L', 0);
-
-		$pdf->line($tab3_posx, $tab3_top, $tab3_posx + $tab3_width, $tab3_top);
-
-		$pdf->SetFont('', '', $default_font_size - 4);
-		$pdf->SetXY($tab3_posx, $tab3_top);
-		$pdf->MultiCell(20, 3, $outputlangs->transnoentities("Payment"), 0, 'L', 0);
-		$pdf->SetXY($tab3_posx + 21, $tab3_top);
-		$pdf->MultiCell(20, 3, $outputlangs->transnoentities("Amount"), 0, 'L', 0);
-		$pdf->SetXY($tab3_posx + 40, $tab3_top);
-		$pdf->MultiCell(20, 3, $outputlangs->transnoentities("Type"), 0, 'L', 0);
-		$pdf->SetXY($tab3_posx + 58, $tab3_top);
-		$pdf->MultiCell(20, 3, $outputlangs->transnoentities("Num"), 0, 'L', 0);
-
-		$pdf->line($tab3_posx, $tab3_top - 1 + $tab3_height, $tab3_posx + $tab3_width, $tab3_top - 1 + $tab3_height);
 	}
 
 	// phpcs:disable PEAR.NamingConventions.ValidFunctionName.ScopeNotCamelCaps
@@ -1200,7 +937,7 @@ class pdf_metro extends ModelePDFFactures
 					$cury += 3;
 		
 					//Bank acct number
-					$pdf->SetXY($curx, $cury + 5);
+					$pdf->SetXY($curx, $cury + 6);
 					$pdf->MultiCell(100, 3, 'Acct. #:'.$outputlangs->convToOutputCharset($account->number), 0, 'L', 0);
 					$cury += 3;					
 					$posy += 2;
@@ -1230,7 +967,37 @@ class pdf_metro extends ModelePDFFactures
 		global $conf, $mysoc;
 
         $sign = 1;
-        if ($object->type == 2 && !empty($conf->global->INVOICE_POSITIVE_CREDIT_NOTE)) $sign = -1;
+		if ($object->type == 2 && !empty($conf->global->INVOICE_POSITIVE_CREDIT_NOTE)) $sign = -1;
+		
+		// Load dim data
+		$totalQty = 0;
+		$totalCs = 0;
+		$nblines = count($object->lines);
+		$isInPieces = $object->array_options['options_inpcs'];
+		for ($i = 0; $i < $nblines; $i++){
+			//only for products not services
+			if($object->lines[$i]->product_type == 1){
+				continue;
+			}
+			//Sum cases
+			$product = new Product($this->db);
+			$product->fetch($object->lines[$i]->fk_product);			
+			$extrafields_product = new ExtraFields($this->db);
+			$extralabels_product = $extrafields_product->fetch_name_optionals_label($product->table_element);
+			$casePack = $outputlangs->convToOutputCharset($product->array_options['options_cpk']);
+
+			if($isInPieces){
+				$totalQty += $object->lines[$i]->qty;
+			}else if(!$isInPieces && $casePack > 1){
+				$totalQty += $object->lines[$i]->qty * $casePack;
+			}			
+
+			if ($casePack > 1 && $isInPieces){
+				$totalCs += $object->lines[$i]->qty / $casePack;
+			}if ($casePack > 1 && !$isInPieces){
+				$totalCs += $object->lines[$i]->qty;
+			}
+		}
 
         $default_font_size = pdf_getPDFFontSize($outputlangs);
 
@@ -1239,7 +1006,8 @@ class pdf_metro extends ModelePDFFactures
 		$pdf->SetFont('', '', $default_font_size - 1);
 
 		// Total table
-		$col1x = 120; $col2x = 170;
+		$col1x = 70; 
+		$col2x = 90;
 		if ($this->page_largeur < 210) // To work with US executive format
 		{
 			$col2x -= 20;
@@ -1256,8 +1024,12 @@ class pdf_metro extends ModelePDFFactures
 		$pdf->MultiCell($col2x - $col1x, $tab2_hl, $outputlangs->transnoentities("Total"), 0, 'L', 1);
 
 		$total_ht = (($conf->multicurrency->enabled && isset($object->multicurrency_tx) && $object->multicurrency_tx != 1) ? $object->multicurrency_total_ht : $object->total_ht);
-		$pdf->SetXY($col2x, $tab2_top + 0);
-		$pdf->MultiCell($largcol2, $tab2_hl, "$".price($sign * ($total_ht + (!empty($object->remise) ? $object->remise : 0)), 0, $outputlangs), 0, 'R', 1);
+		$pdf->SetXY($col2x+20, $tab2_top + 0);
+		$pdf->MultiCell($col2x - $col1x, $tab2_hl, $totalQty, 0, 'R', 1);
+
+		// Total cs		
+		$pdf->SetXY($col2x+60, $tab2_top + 0);
+		$pdf->MultiCell($col2x - $col1x, $tab2_hl, $totalCs > 0 ? $totalCs: "" , 0, 'R', 1);
 
 		// Show VAT by rates and total
 		$pdf->SetFillColor(248, 248, 248);
@@ -1442,115 +1214,7 @@ class pdf_metro extends ModelePDFFactures
 					$pdf->SetXY($col2x, $tab2_top + $tab2_hl * $index);
 					$pdf->MultiCell($largcol2, $tab2_hl, price($sign * $object->revenuestamp), $useborder, 'R', 1);
 				}
-
-				// Total TTC
-				$index++;
-				$pdf->SetXY($col1x, $tab2_top + $tab2_hl * $index);
-				$pdf->SetTextColor(0, 0, 60);
-				$pdf->SetFillColor(224, 224, 224);
-				$pdf->MultiCell($col2x - $col1x, $tab2_hl, $outputlangs->transnoentities("TotalTTC"), $useborder, 'L', 1);
-
-				$pdf->SetXY($col2x, $tab2_top + $tab2_hl * $index);
-				$pdf->MultiCell($largcol2, $tab2_hl, price($sign * $total_ttc, 0, $outputlangs), $useborder, 'R', 1);
-
-				// Retained warranty
-				if (!empty($object->situation_final) && ($object->type == Facture::TYPE_SITUATION && (!empty($object->retained_warranty))))
-				{
-					$displayWarranty = false;
-
-				    // Check if this situation invoice is 100% for real
-				    if (!empty($object->lines)) {
-				        $displayWarranty = true;
-				        foreach ($object->lines as $i => $line) {
-				            if ($line->product_type < 2 && $line->situation_percent < 100) {
-				                $displayWarranty = false;
-				                break;
-				            }
-						}
-				    }
-
-				    if ($displayWarranty) {
-    				    $pdf->SetTextColor(40, 40, 40);
-    				    $pdf->SetFillColor(255, 255, 255);
-
-    				    $retainedWarranty = $object->total_ttc * $object->retained_warranty / 100;
-    				    $billedWithRetainedWarranty = $object->total_ttc - $retainedWarranty;
-
-    				    // Billed - retained warranty
-    				    $index++;
-    				    $pdf->SetXY($col1x, $tab2_top + $tab2_hl * $index);
-    				    $pdf->MultiCell($col2x - $col1x, $tab2_hl, $outputlangs->transnoentities("ToPayOn", dol_print_date($object->date_lim_reglement, 'day')), $useborder, 'L', 1);
-
-    				    $pdf->SetXY($col2x, $tab2_top + $tab2_hl * $index);
-    				    $pdf->MultiCell($largcol2, $tab2_hl, price($billedWithRetainedWarranty), $useborder, 'R', 1);
-
-    				    // retained warranty
-    				    $index++;
-    				    $pdf->SetXY($col1x, $tab2_top + $tab2_hl * $index);
-
-    				    $retainedWarrantyToPayOn = $outputlangs->transnoentities("RetainedWarranty").' ('.$object->retained_warranty.'%)';
-    				    $retainedWarrantyToPayOn .= !empty($object->retained_warranty_date_limit) ? ' '.$outputlangs->transnoentities("toPayOn", dol_print_date($object->retained_warranty_date_limit, 'day')) : '';
-
-    				    $pdf->MultiCell($col2x - $col1x, $tab2_hl, $retainedWarrantyToPayOn, $useborder, 'L', 1);
-    				    $pdf->SetXY($col2x, $tab2_top + $tab2_hl * $index);
-    				    $pdf->MultiCell($largcol2, $tab2_hl, price($retainedWarranty), $useborder, 'R', 1);
-				    }
-				}
 			}
-		}
-
-		$pdf->SetTextColor(0, 0, 0);
-		$creditnoteamount = $object->getSumCreditNotesUsed(($conf->multicurrency->enabled && $object->multicurrency_tx != 1) ? 1 : 0); // Warning, this also include excess received
-		$depositsamount = $object->getSumDepositsUsed(($conf->multicurrency->enabled && $object->multicurrency_tx != 1) ? 1 : 0);
-		//print "x".$creditnoteamount."-".$depositsamount;exit;
-		$resteapayer = price2num($total_ttc - $deja_regle - $creditnoteamount - $depositsamount, 'MT');
-		if (!empty($object->paye)) $resteapayer = 0;
-
-		if (($deja_regle > 0 || $creditnoteamount > 0 || $depositsamount > 0) && empty($conf->global->INVOICE_NO_PAYMENT_DETAILS))
-		{
-			// Already paid + Deposits
-			/*$index++;
-			$pdf->SetXY($col1x, $tab2_top + $tab2_hl * $index);
-			$pdf->MultiCell($col2x - $col1x, $tab2_hl, $outputlangs->transnoentities("Paid"), 0, 'L', 0);
-			$pdf->SetXY($col2x, $tab2_top + $tab2_hl * $index);
-			$pdf->MultiCell($largcol2, $tab2_hl, "$" . price($deja_regle + $depositsamount, 0, $outputlangs), 0, 'R', 0);
-
-			// Credit note
-			if ($creditnoteamount)
-			{
-				$labeltouse = ($outputlangs->transnoentities("CreditNotesOrExcessReceived") != "CreditNotesOrExcessReceived") ? $outputlangs->transnoentities("CreditNotesOrExcessReceived") : $outputlangs->transnoentities("CreditNotes");
-				$index++;
-				$pdf->SetXY($col1x, $tab2_top + $tab2_hl * $index);
-				$pdf->MultiCell($col2x - $col1x, $tab2_hl, $labeltouse, 0, 'L', 0);
-				$pdf->SetXY($col2x, $tab2_top + $tab2_hl * $index);
-				$pdf->MultiCell($largcol2, $tab2_hl, "$" . price($creditnoteamount, 0, $outputlangs), 0, 'R', 0);
-			}
-
-			// Escompte
-			if ($object->close_code == Facture::CLOSECODE_DISCOUNTVAT)
-			{
-				$index++;
-				$pdf->SetFillColor(255, 255, 255);
-
-				$pdf->SetXY($col1x, $tab2_top + $tab2_hl * $index);
-				$pdf->MultiCell($col2x - $col1x, $tab2_hl, $outputlangs->transnoentities("EscompteOfferedShort"), $useborder, 'L', 1);
-				$pdf->SetXY($col2x, $tab2_top + $tab2_hl * $index);
-				$pdf->MultiCell($largcol2, $tab2_hl, "$" . price($object->total_ttc - $deja_regle - $creditnoteamount - $depositsamount, 0, $outputlangs), $useborder, 'R', 1);
-
-				$resteapayer = 0;
-			}
-
-			$index++;
-			$pdf->SetTextColor(0, 0, 60);
-			$pdf->SetFillColor(224, 224, 224);
-			$pdf->SetXY($col1x, $tab2_top + $tab2_hl * $index);
-			$pdf->MultiCell($col2x - $col1x, $tab2_hl, $outputlangs->transnoentities("RemainderToPay"), $useborder, 'L', 1);
-			$pdf->SetXY($col2x, $tab2_top + $tab2_hl * $index);
-			$pdf->MultiCell($largcol2, $tab2_hl, "$" . price($resteapayer, 0, $outputlangs), $useborder, 'R', 1);
-
-			$pdf->SetFont('', '', $default_font_size - 1);
-			$pdf->SetTextColor(0, 0, 0);
-			*/
 		}
 
 		$index++;
@@ -1588,7 +1252,7 @@ class pdf_metro extends ModelePDFFactures
 
 		if (empty($hidetop))
 		{
-			$titre = "Amount in US Dollars";
+			$titre = "";
 			$pdf->SetXY($this->page_largeur - $this->marge_droite - ($pdf->GetStringWidth($titre) + 3), $tab_top - 4);
 			$pdf->MultiCell(($pdf->GetStringWidth($titre) + 3), 2, $titre);
 
@@ -1639,7 +1303,7 @@ class pdf_metro extends ModelePDFFactures
 			$pdf->line($this->posxup-1, $tab_top, $this->posxup-1, $tab_top + $tab_height);
 			if (empty($hidetop)) {
 				$pdf->SetXY($this->posxup-1, $tab_top+1);
-				$pdf->MultiCell($this->posxqty-$this->posxup-1, 2, $outputlangs->transnoentities("Qty"), '', 'C');
+				$pdf->MultiCell($this->posxqty-$this->posxup-1, 2, $outputlangs->transnoentities("PCS"), '', 'C');
 			}
 		}
 
@@ -1647,15 +1311,15 @@ class pdf_metro extends ModelePDFFactures
 		if (empty($hidetop))
 		{
 			$pdf->SetXY($this->posxqty - 1, $tab_top + 1);
-			$pdf->MultiCell($this->posxunit - $this->posxqty - 1, 2, $outputlangs->transnoentities("PriceU"), '', 'C');
+			$pdf->MultiCell($this->posxunit - $this->posxqty - 1, 2, "", '', 'C');
 		}
 
-		if (!empty($conf->global->PRODUCT_USE_UNITS))
+		if (!empty($this->use_units))
 		{
 			$pdf->line($this->posxunit - 1, $tab_top, $this->posxunit - 1, $tab_top + $tab_height);
 			if (empty($hidetop)) {
 				$pdf->SetXY($this->posxunit - 1, $tab_top + 1);
-				$pdf->MultiCell($this->posxdiscount - $this->posxunit - 1, 2, $outputlangs->transnoentities("Unit"), '', 'C');
+				$pdf->MultiCell($this->posxdiscount - $this->posxunit - 1, 2, $outputlangs->transnoentities("CS Qty"), '', 'C');
 			}
 		}
 
@@ -1690,7 +1354,7 @@ class pdf_metro extends ModelePDFFactures
 			if (empty($hidetop))
 			{
 				$pdf->SetXY($this->postotalht - 1, $tab_top + 1);
-				$pdf->MultiCell(30, 2, $outputlangs->transnoentities("Total"), '', 'C');
+				$pdf->MultiCell(30, 2, $outputlangs->transnoentities(""), '', 'C');
 			}
 		}
         
@@ -1716,12 +1380,6 @@ class pdf_metro extends ModelePDFFactures
 		$default_font_size = pdf_getPDFFontSize($outputlangs);
 
 		pdf_pagehead($pdf, $outputlangs, $this->page_hauteur);
-
-		// Show Draft Watermark
-		if ($object->statut == Facture::STATUS_DRAFT && (!empty($conf->global->FACTURE_DRAFT_WATERMARK)))
-        {
-		      pdf_watermark($pdf, $outputlangs, $this->page_hauteur, $this->page_largeur, 'mm', $conf->global->FACTURE_DRAFT_WATERMARK);
-        }
 
 		$pdf->SetTextColor(0, 0, 60);
 		$pdf->SetFont('', 'B', $default_font_size + 3);
@@ -1770,74 +1428,35 @@ class pdf_metro extends ModelePDFFactures
 		$pdf->SetFont('', 'B', $default_font_size + 3);
 		$pdf->SetXY($posx, $posy);
 		$pdf->SetTextColor(0, 0, 60);
-		$title = $outputlangs->transnoentities("PdfInvoiceTitle");
-		if ($object->type == 1) $title = $outputlangs->transnoentities("InvoiceReplacement");
-		if ($object->type == 2) $title = $outputlangs->transnoentities("InvoiceAvoir");
-		if ($object->type == 3) $title = $outputlangs->transnoentities("InvoiceDeposit");
-		if ($object->type == 4) $title = $outputlangs->transnoentities("InvoiceProForma");
-		if ($this->situationinvoice) $title = $outputlangs->transnoentities("InvoiceSituation");
+		$title = "Packing List";
+		
 		$pdf->MultiCell($w, 3, $title, '', 'R');
 
 		$pdf->SetFont('', 'B', $default_font_size);
 
-		$posy += 5;
+		$posy += 7;
 		$pdf->SetXY($posx, $posy);
 		$pdf->SetTextColor(0, 0, 60);
-		$textref = $outputlangs->convToOutputCharset($object->ref);
-		if ($object->statut == Facture::STATUS_DRAFT)
+		$objectref = "";
+		$clientPO = $object->array_options['options_cpo']?$object->array_options['options_cpo']:($object->ref_client?$object->ref_client:"[]");
+		if ($object->statut == Commande::STATUS_DRAFT)
 		{
-			$pdf->SetTextColor(128, 0, 0);
-			$textref .= ' - '.$outputlangs->transnoentities("NotValidated");
+			$objectref = "PO:".$clientPO;
+		}else{
+			//$objectref = dol_sanitizeFileName($object->ref);
+			$objectref = "PO:".$clientPO;
 		}
+		$textref = $outputlangs->convToOutputCharset($objectref);
+		
 		$pdf->MultiCell($w, 4, $textref, '', 'R');
 
 		$posy += 1;
 		$pdf->SetFont('', '', $default_font_size - 2);
 
-		/*if ($object->ref_client)
-		{
-			$posy += 4;
-			$pdf->SetXY($posx, $posy);
-			$pdf->SetTextColor(0, 0, 60);
-			$pdf->MultiCell($w, 3, $outputlangs->transnoentities("RefCustomer")." : ".$outputlangs->convToOutputCharset($object->ref_client), '', 'R');
-		}*/
-
-		$objectidnext = $object->getIdReplacingInvoice('validated');
-		if ($object->type == 0 && $objectidnext)
-		{
-			$objectreplacing = new Facture($this->db);
-			$objectreplacing->fetch($objectidnext);
-
-			$posy += 3;
-			$pdf->SetXY($posx, $posy);
-			$pdf->SetTextColor(0, 0, 60);
-			$pdf->MultiCell($w, 3, $outputlangs->transnoentities("ReplacementByInvoice").' : '.$outputlangs->convToOutputCharset($objectreplacing->ref), '', 'R');
-		}
-		if ($object->type == 1)
-		{
-			$objectreplaced = new Facture($this->db);
-			$objectreplaced->fetch($object->fk_facture_source);
-
-			$posy += 4;
-			$pdf->SetXY($posx, $posy);
-			$pdf->SetTextColor(0, 0, 60);
-			$pdf->MultiCell($w, 3, $outputlangs->transnoentities("ReplacementInvoice").' : '.$outputlangs->convToOutputCharset($objectreplaced->ref), '', 'R');
-		}
-		if ($object->type == 2 && !empty($object->fk_facture_source))
-		{
-			$objectreplaced = new Facture($this->db);
-			$objectreplaced->fetch($object->fk_facture_source);
-
-			$posy += 3;
-			$pdf->SetXY($posx, $posy);
-			$pdf->SetTextColor(0, 0, 60);
-			$pdf->MultiCell($w, 3, $outputlangs->transnoentities("CorrectionInvoice").' : '.$outputlangs->convToOutputCharset($objectreplaced->ref), '', 'R');
-		}
-
 		$posy += 4;
 		$pdf->SetXY($posx, $posy);
 		$pdf->SetTextColor(0, 0, 60);
-		$pdf->MultiCell($w, 3, $outputlangs->transnoentities("DateInvoice")." : ".dol_print_date($object->date, "day", false, $outputlangs), '', 'R');
+		$pdf->MultiCell($w, 3, "Order date"." : ".dol_print_date($object->date, "day", false, $outputlangs), '', 'R');
 
 		if (!empty($conf->global->INVOICE_POINTOFTAX_DATE))
 		{
@@ -1896,20 +1515,28 @@ class pdf_metro extends ModelePDFFactures
 		{
 			$top_shift = $pdf->getY() - $current_y;
 		}
+
 		//Show company info
 		// Show sender information
 		// Sender properties
 		$carac_emetteur = pdf_build_address($outputlangs, $this->emetteur, $object->thirdparty, '', 0, 'source', $object);
 
-		$pdf->SetXY($posx -35, $posy-17);
+		$pdf->SetXY($posx -35, $posy-15);
 		$pdf->SetFont('', '', $default_font_size - 1);
 		$pdf->MultiCell($widthrecbox - 2, 4, $carac_emetteur, 0, 'L');
 
 		if ($showaddress)
 		{
 			// Sender properties
-			$carac_emetteur = pdf_build_address($outputlangs, $this->emetteur, $object->thirdparty, '', 0, 'source', $object);
-
+			$carac_emetteur = '';
+		 	// Add internal contact of origin element if defined
+			$arrayidcontact = array();
+			if (!empty($origin) && is_object($object->$origin)) $arrayidcontact = $object->$origin->getIdContact('internal', 'SALESREPFOLL');
+		 	if (count($arrayidcontact) > 0)
+		 	{
+		 		$object->fetch_user(reset($arrayidcontact));
+		 		$carac_emetteur .= ($carac_emetteur ? "\n" : '').$outputlangs->transnoentities("Name").": ".$outputlangs->convToOutputCharset($object->user->getFullName($outputlangs))."\n";
+		 	}
 			// Show sender
 			$posy = !empty($conf->global->MAIN_PDF_USE_ISO_LOCATION) ? 40 : 42;
 			$posy += $top_shift;
@@ -1929,7 +1556,6 @@ class pdf_metro extends ModelePDFFactures
 			$pdf->SetFillColor(255, 255, 255);
 			$pdf->MultiCell($widthrecbox, $hautcadre, "", 0, 'R', 1);
 			$pdf->SetTextColor(0, 0, 60);
-			$pdf->Rect($posx, $posy, $widthrecbox, $hautcadre);
 
 			//Recipient name
 			// On peut utiliser le nom de la societe du contact
@@ -1953,7 +1579,7 @@ class pdf_metro extends ModelePDFFactures
 			$pdf->SetXY($posx + 2, $posy);
 			$pdf->SetFont('', '', $default_font_size - 1);
 			$pdf->MultiCell($widthrecbox - 2, 4, $carac_client, 0, 'L');
-
+			//$carac_emetteur
 
 			// If BILLING contact defined on invoice, we use it
 			$usecontact = false;
@@ -1962,7 +1588,9 @@ class pdf_metro extends ModelePDFFactures
 			{
 				$usecontact = true;
 				$result = $object->fetch_contact($arrayidcontact[0]);
-			}			
+			}
+
+			
 			
 			// If SHIPPING contact defined, we use it
 			$usecontact = false;
@@ -1982,7 +1610,8 @@ class pdf_metro extends ModelePDFFactures
 			$carac_client_name = pdfBuildThirdpartyName($thirdparty, $outputlangs);
 
 			$carac_client = pdf_build_address($outputlangs, $this->emetteur, $object->thirdparty, ($usecontact ? $object->contact : ''), $usecontact, 'targetwithdetails_phone', $object);
-	
+
+			
 			// Show recipient
 			$widthrecbox = !empty($conf->global->MAIN_PDF_USE_ISO_LOCATION) ? 92 : 100;
 			if ($this->page_largeur < 210) $widthrecbox = 84; // To work with US executive format
@@ -1996,7 +1625,7 @@ class pdf_metro extends ModelePDFFactures
 			$pdf->SetFont('', 'B', $default_font_size - 2);
 			$pdf->SetXY($posx + 2, $posy - 5);
 			$pdf->MultiCell($widthrecbox, 5, "Ship to".":", 0, 'L');
-			
+			$pdf->Rect($posx, $posy, $widthrecbox, $hautcadre);
 
 			// Show recipient name
 			$pdf->SetXY($posx + 2, $posy + 3);
@@ -2013,6 +1642,200 @@ class pdf_metro extends ModelePDFFactures
 
 		$pdf->SetTextColor(0, 0, 0);
 		return $top_shift;
+	}
+
+
+
+	// phpcs:disable PEAR.NamingConventions.ValidFunctionName.ScopeNotCamelCaps
+	// phpcs:disable PEAR.NamingConventions.ValidFunctionName.PublicUnderscore
+	/**
+	 *  Show payments table
+	 *
+     *  @param	PDF			$pdf            Object PDF
+     *  @param  Object		$object         Object invoice
+     *  @param  int			$posy           Position y in PDF
+     *  @param  Translate	$outputlangs    Object langs for output
+     *  @param  int			$heightforfooter height for footer
+     *  @return int             			<0 if KO, >0 if OK
+	 */
+	protected function _tableau_versements(&$pdf, $object, $posy, $outputlangs, $heightforfooter = 0)
+	{
+        // phpcs:enable
+		global $conf;
+
+        $sign = 1;
+        if ($object->type == 2 && !empty($conf->global->INVOICE_POSITIVE_CREDIT_NOTE)) $sign = -1;
+
+		$current_page = $pdf->getPage();
+        $tab3_posx = 120;
+		$tab3_top = $posy + 8;
+		$tab3_width = 80;
+		$tab3_height = 4;
+		if ($this->page_largeur < 210) // To work with US executive format
+		{
+			$tab3_posx -= 20;
+		}
+
+		$default_font_size = pdf_getPDFFontSize($outputlangs);
+
+		$this->_tableau_versements_header($pdf, $object, $outputlangs, $default_font_size, $tab3_posx, $tab3_top, $tab3_width, $tab3_height);
+
+		$y = 0;
+
+		$pdf->SetFont('', '', $default_font_size - 4);
+
+
+		// Loop on each discount available (deposits and credit notes and excess of payment included)
+		$sql = "SELECT re.rowid, re.amount_ht, re.multicurrency_amount_ht, re.amount_tva, re.multicurrency_amount_tva,  re.amount_ttc, re.multicurrency_amount_ttc,";
+		$sql .= " re.description, re.fk_facture_source,";
+		$sql .= " f.type, f.datef";
+		$sql .= " FROM ".MAIN_DB_PREFIX."societe_remise_except as re, ".MAIN_DB_PREFIX."facture as f";
+		$sql .= " WHERE re.fk_facture_source = f.rowid AND re.fk_facture = ".$object->id;
+		$resql = $this->db->query($sql);
+		if ($resql)
+		{
+			$num = $this->db->num_rows($resql);
+			$i = 0;
+			$invoice = new Facture($this->db);
+			while ($i < $num)
+			{
+				$y += 3;
+				if ($tab3_top + $y >= ($this->page_hauteur - $heightforfooter))
+				{
+					$y = 0;
+					$current_page++;
+					$pdf->AddPage('', '', true);
+					if (!empty($tplidx)) $pdf->useTemplate($tplidx);
+					if (empty($conf->global->MAIN_PDF_DONOTREPEAT_HEAD)) $this->_pagehead($pdf, $object, 0, $outputlangs);
+					$pdf->setPage($current_page);
+					$this->_tableau_versements_header($pdf, $object, $outputlangs, $default_font_size, $tab3_posx, $tab3_top + $y - 3, $tab3_width, $tab3_height);
+				}
+
+				$obj = $this->db->fetch_object($resql);
+
+				if(!$obj->type == 0){
+					if ($obj->type == 2) $text = $outputlangs->transnoentities("CreditNote");
+					elseif ($obj->type == 3) $text = $outputlangs->transnoentities("Deposit");
+					elseif ($obj->type == 0) $text = $outputlangs->transnoentities("ExcessReceived");
+					else $text = $outputlangs->transnoentities("UnknownType");
+	
+					$invoice->fetch($obj->fk_facture_source);
+	
+					$pdf->SetXY($tab3_posx, $tab3_top + $y);
+					$pdf->MultiCell(20, 3, dol_print_date($this->db->jdate($obj->datef), 'day', false, $outputlangs, true), 0, 'L', 0);
+					$pdf->SetXY($tab3_posx + 21, $tab3_top + $y);
+					$pdf->MultiCell(20, 3, "$" . price(($conf->multicurrency->enabled && $object->multicurrency_tx != 1) ? $obj->multicurrency_amount_ttc : $obj->amount_ttc, 0, $outputlangs), 0, 'L', 0);
+					$pdf->SetXY($tab3_posx + 40, $tab3_top + $y);
+					$pdf->MultiCell(20, 3, $text, 0, 'L', 0);
+					$pdf->SetXY($tab3_posx + 58, $tab3_top + $y);
+					$pdf->MultiCell(20, 3, $invoice->ref, 0, 'L', 0);
+	
+					$pdf->line($tab3_posx, $tab3_top + $y + 3, $tab3_posx + $tab3_width, $tab3_top + $y + 3);
+				}
+				
+
+				$i++;
+			}
+		}
+		else
+		{
+			$this->error = $this->db->lasterror();
+			return -1;
+		}
+
+		// Loop on each payment
+		// TODO Call getListOfPaymentsgetListOfPayments instead of hard coded sql
+		$sql = "SELECT p.datep as date, p.fk_paiement, p.num_paiement as num, pf.amount as amount, pf.multicurrency_amount,";
+		$sql .= " cp.code";
+		$sql .= " FROM ".MAIN_DB_PREFIX."paiement_facture as pf, ".MAIN_DB_PREFIX."paiement as p";
+		$sql .= " LEFT JOIN ".MAIN_DB_PREFIX."c_paiement as cp ON p.fk_paiement = cp.id";
+		$sql .= " WHERE pf.fk_paiement = p.rowid AND pf.fk_facture = ".$object->id;
+		//$sql.= " WHERE pf.fk_paiement = p.rowid AND pf.fk_facture = 1";
+		$sql .= " ORDER BY p.datep";
+
+		$resql = $this->db->query($sql);
+		if ($resql)
+		{
+			$num = $this->db->num_rows($resql);
+			$i = 0;
+			while ($i < $num) {
+				$y += 3;
+				if ($tab3_top + $y >= ($this->page_hauteur - $heightforfooter))
+				{
+					$y = 0;
+					$current_page++;
+					$pdf->AddPage('', '', true);
+					if (!empty($tplidx)) $pdf->useTemplate($tplidx);
+					if (empty($conf->global->MAIN_PDF_DONOTREPEAT_HEAD)) $this->_pagehead($pdf, $object, 0, $outputlangs);
+					$pdf->setPage($current_page);
+					$this->_tableau_versements_header($pdf, $object, $outputlangs, $default_font_size, $tab3_posx, $tab3_top + $y - 3, $tab3_width, $tab3_height);
+				}
+
+				$row = $this->db->fetch_object($resql);
+
+				$pdf->SetXY($tab3_posx, $tab3_top + $y);
+				$pdf->MultiCell(20, 3, dol_print_date($this->db->jdate($row->date), 'day', false, $outputlangs, true), 0, 'L', 0);
+				$pdf->SetXY($tab3_posx + 21, $tab3_top + $y);
+				$pdf->MultiCell(20, 3, "$" .price($sign * (($conf->multicurrency->enabled && $object->multicurrency_tx != 1) ? $row->multicurrency_amount : $row->amount), 0, $outputlangs), 0, 'L', 0);
+				$pdf->SetXY($tab3_posx + 40, $tab3_top + $y);
+				$oper = $outputlangs->transnoentitiesnoconv("PaymentTypeShort".$row->code);
+
+				$pdf->MultiCell(20, 3, $oper, 0, 'L', 0);
+				$pdf->SetXY($tab3_posx + 58, $tab3_top + $y);
+				$pdf->MultiCell(30, 3, $row->num, 0, 'L', 0);
+
+				$pdf->line($tab3_posx, $tab3_top + $y + 3, $tab3_posx + $tab3_width, $tab3_top + $y + 3);
+
+				$i++;
+			}
+
+			return $tab3_top + $y + 3;
+		}
+		else
+		{
+			$this->error = $this->db->lasterror();
+			return -1;
+		}
+	}
+
+	// phpcs:disable PEAR.NamingConventions.ValidFunctionName.ScopeNotCamelCaps
+	// phpcs:disable PEAR.NamingConventions.ValidFunctionName.PublicUnderscore
+	/**
+	 * Function _tableau_versements_header
+	 *
+	 * @param TCPDF 		$pdf				Object PDF
+	 * @param Facture		$object				Object invoice
+	 * @param Translate		$outputlangs		Object langs for output
+	 * @param int			$default_font_size	Font size
+	 * @param int			$tab3_posx			pos x
+	 * @param int 			$tab3_top			pos y
+	 * @param int 			$tab3_width			width
+	 * @param int 			$tab3_height		height
+	 * @return void
+	 */
+	protected function _tableau_versements_header($pdf, $object, $outputlangs, $default_font_size, $tab3_posx, $tab3_top, $tab3_width, $tab3_height)
+	{
+	    // phpcs:enable
+	    $title = "Paiments on account";
+		if ($object->type == 2) $title = "Refunds applied";
+
+		$pdf->SetFont('', '', $default_font_size - 3);
+		$pdf->SetXY($tab3_posx, $tab3_top - 4);
+		$pdf->MultiCell(60, 3, $title, 0, 'L', 0);
+
+		$pdf->line($tab3_posx, $tab3_top, $tab3_posx + $tab3_width, $tab3_top);
+
+		$pdf->SetFont('', '', $default_font_size - 4);
+		$pdf->SetXY($tab3_posx, $tab3_top);
+		$pdf->MultiCell(20, 3, $outputlangs->transnoentities("Payment"), 0, 'L', 0);
+		$pdf->SetXY($tab3_posx + 21, $tab3_top);
+		$pdf->MultiCell(20, 3, $outputlangs->transnoentities("Amount"), 0, 'L', 0);
+		$pdf->SetXY($tab3_posx + 40, $tab3_top);
+		$pdf->MultiCell(20, 3, $outputlangs->transnoentities("Type"), 0, 'L', 0);
+		$pdf->SetXY($tab3_posx + 58, $tab3_top);
+		$pdf->MultiCell(20, 3, $outputlangs->transnoentities("Num"), 0, 'L', 0);
+
+		$pdf->line($tab3_posx, $tab3_top - 1 + $tab3_height, $tab3_posx + $tab3_width, $tab3_top - 1 + $tab3_height);
 	}
 
 	// phpcs:disable PEAR.NamingConventions.ValidFunctionName.PublicUnderscore
