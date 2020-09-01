@@ -244,6 +244,10 @@ class pdf_metro_invoice extends ModelePDFFactures
 		$this->totalDiscountAmount = 0;
 		//Total Sale amount
 		$this->totalSaleAmount = 0;
+		//Total Products amount
+		$this->totalProductsAmount = 0;
+		//Total Services amount
+		$this->totalServicesAmount = 0;
 
 		dol_syslog("write_file outputlangs->defaultlang=".(is_object($outputlangs) ? $outputlangs->defaultlang : 'null'));
 
@@ -637,11 +641,17 @@ class pdf_metro_invoice extends ModelePDFFactures
 
 					// Total HT line					
 					//$total_excl_tax = pdf_getlinetotalexcltax($object, $i, $outputlangs, $hidedetails);
+					
+					//Sum products
 					$totalLine = (float) round($object->lines[$i]->subprice * $object->lines[$i]->qty,2);
-					$this->totalSaleAmount += $totalLine;
+					if($object->lines[$i]->product_type == 0){
+						$this->totalProductsAmount += $totalLine;
+					}else{
+						$this->totalServicesAmount += $totalLine;
+					}
+					
 					$pdf->SetXY($this->postotalht, $curY);
 					$pdf->MultiCell($this->page_largeur - $this->marge_droite - $this->postotalht, 3, number_format($totalLine, 2), 0, 'R', 0);
-
 
 					$sign = 1;
 					if (isset($object->type) && $object->type == 2 && !empty($conf->global->INVOICE_POSITIVE_CREDIT_NOTE)) $sign = -1;
@@ -1249,13 +1259,13 @@ class pdf_metro_invoice extends ModelePDFFactures
 
 			$total_ht = (($conf->multicurrency->enabled && isset($object->multicurrency_tx) && $object->multicurrency_tx != 1) ? $object->multicurrency_total_ht : $object->total_ht);
 			$pdf->SetXY($col2x, $tab2_top + 0);
-			$pdf->MultiCell($largcol2, $tab2_hl, "$". number_format($this->totalSaleAmount, 2), 0, 'R', 1);
+			$pdf->MultiCell($largcol2, $tab2_hl, "$". number_format($this->totalProductsAmount + $this->totalServicesAmount, 2), 0, 'R', 1);
 
 			//Discount
 			$pdf->SetFont('', '', $default_font_size + 1);
 			$pdf->SetFillColor(255, 255, 255);
 			$pdf->SetXY($col1x, $tab2_top + 8);
-			$pdf->MultiCell($col2x - $col1x, $tab2_hl, "Order Disc.(".number_format(($this->totalDiscountAmount/$this->totalSaleAmount)*100, 2) ."%)", 0, 'L', 1);
+			$pdf->MultiCell($col2x - $col1x, $tab2_hl, "Order Disc.(".number_format(($this->totalDiscountAmount/$this->totalProductsAmount)*100, 2) ."%)", 0, 'L', 1);
 
 			$total_ht = (($conf->multicurrency->enabled && isset($object->multicurrency_tx) && $object->multicurrency_tx != 1) ? $object->multicurrency_total_ht : $object->total_ht);
 			$pdf->SetXY($col2x, $tab2_top + 8);
@@ -1920,6 +1930,15 @@ class pdf_metro_invoice extends ModelePDFFactures
 
 			$carac_client_name = pdfBuildThirdpartyName($thirdparty, $outputlangs);
 
+			// If BILLING contact defined on invoice, we use it
+			$usecontact = false;
+			$arrayidcontact = $object->getIdContact('external', 'BILLING');
+			if (count($arrayidcontact) > 0)
+			{
+				$usecontact = true;
+				$result = $object->fetch_contact($arrayidcontact[0]);
+			}	
+
 			$carac_client = pdf_build_address($outputlangs, $this->emetteur, $object->thirdparty, ($usecontact ? $object->contact : ''), $usecontact, 'targetwithdetails_phone', $object);
 
 			// Show sender name
@@ -1932,16 +1951,6 @@ class pdf_metro_invoice extends ModelePDFFactures
 			$pdf->SetXY($posx + 2, $posy);
 			$pdf->SetFont('', '', $default_font_size - 1);
 			$pdf->MultiCell($widthrecbox - 2, 4, $carac_client, 0, 'L');
-
-
-			// If BILLING contact defined on invoice, we use it
-			$usecontact = false;
-			$arrayidcontact = $object->getIdContact('external', 'BILLING');
-			if (count($arrayidcontact) > 0)
-			{
-				$usecontact = true;
-				$result = $object->fetch_contact($arrayidcontact[0]);
-			}			
 			
 			// If SHIPPING contact defined, we use it
 			$usecontact = false;
