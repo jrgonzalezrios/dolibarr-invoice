@@ -486,6 +486,9 @@ class pdf_metro_pl_so extends ModelePDFCommandes
 					$curX = $this->posxdesc - 1;
 
 					$pdf->startTransaction();
+					// Hide Rereference from description
+					$hideref = 1;
+					$hidedesc = 1;
 					pdf_writelinedesc($pdf, $object, $i, $outputlangs, $this->posxpicture - $curX - $progress_width, 3, $curX, $curY, $hideref, $hidedesc);
 					
 					$pageposafter = $pdf->getPage();

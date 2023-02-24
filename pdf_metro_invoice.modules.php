@@ -171,8 +171,6 @@ class pdf_metro_invoice extends ModelePDFFactures
 		$this->option_freetext = 1; // Support add of a personalised text
 		$this->option_draft_watermark = 1; // Support add of a watermark on drafts
 
-		$this->franchise = !$mysoc->tva_assuj;
-
 		// Get source company
 		$this->emetteur = $mysoc;
 		if (empty($this->emetteur->country_code)) $this->emetteur->country_code = substr($langs->defaultlang, -2); // By default, if was not defined
@@ -240,6 +238,7 @@ class pdf_metro_invoice extends ModelePDFFactures
 
 		//Invoice is in pcs
 		$this->isInPcs = $object->array_options['options_inpcs'];
+
 		//Total Discount if discount
 		$this->totalDiscountAmount = 0;
 		//Total Sale amount
@@ -250,7 +249,7 @@ class pdf_metro_invoice extends ModelePDFFactures
 		$this->totalServicesAmount = 0;
 
 		dol_syslog("write_file outputlangs->defaultlang=".(is_object($outputlangs) ? $outputlangs->defaultlang : 'null'));
-
+		
 		if (!is_object($outputlangs)) $outputlangs = $langs;
 		// For backward compatibility with FPDF, force output charset to ISO, because FPDF expect text to be encoded in ISO
 		if (!empty($conf->global->MAIN_USE_FPDF)) $outputlangs->charset_output = 'ISO-8859-1';
@@ -287,25 +286,23 @@ class pdf_metro_invoice extends ModelePDFFactures
 			}
 		}
 		if (count($realpatharray) == 0) $this->posxpicture = $this->posxtva;
-
+		
 		if ($conf->facture->dir_output)
 		{
 			$object->fetch_thirdparty();
 
-			$deja_regle = $object->getSommePaiement(($conf->multicurrency->enabled && $object->multicurrency_tx != 1) ? 1 : 0);
-			$amount_credit_notes_included = $object->getSumCreditNotesUsed(($conf->multicurrency->enabled && $object->multicurrency_tx != 1) ? 1 : 0);
-			$amount_deposits_included = $object->getSumDepositsUsed(($conf->multicurrency->enabled && $object->multicurrency_tx != 1) ? 1 : 0);
+			$deja_regle = $object->getSommePaiement((!empty($conf->multicurrency->enabled) && $object->multicurrency_tx != 1) ? 1 : 0);
+			$amount_credit_notes_included = $object->getSumCreditNotesUsed((!empty($conf->multicurrency->enabled) && $object->multicurrency_tx != 1) ? 1 : 0);
+			$amount_deposits_included = $object->getSumDepositsUsed((!empty($conf->multicurrency->enabled) && $object->multicurrency_tx != 1) ? 1 : 0);
 
 			// Definition of $dir and $file
 			if ($object->specimen)
 			{
 				$dir = $conf->facture->dir_output;
 				$file = $dir."/SPECIMEN.pdf";
-			}
-			else
-			{
+			} else {
 				$clientPO = $object->array_options['options_cpo']?$object->array_options['options_cpo']:($object->ref_client?$object->ref_client:"[PO]");
-				$clientPO = trim($clientPO);
+				$clientPO = trim(str_replace("/","-",$clientPO));
 				$objectref = dol_sanitizeFileName($object->ref);
 				$dir = $conf->facture->dir_output."/".$objectref;
 				$tpAlias = $object->thirdparty->name_alias?$object->thirdparty->name_alias:"[]";
@@ -316,8 +313,9 @@ class pdf_metro_invoice extends ModelePDFFactures
 					$objectref = dol_sanitizeFileName($object->ref);
 				}
 				$lineName = trim($object->array_options['options_line']);
-				$file = $dir."/".$tpAlias ." ".$objectref." ". $lineName ." PO#".$clientPO.".pdf";
+				$file = $dir."/".$tpAlias ." ".$objectref." ". $lineName ." PO#".$clientPO.".pdf";	
 			}
+			
 			if (!file_exists($dir))
 			{
 				if (dol_mkdir($dir) < 0)
@@ -326,7 +324,6 @@ class pdf_metro_invoice extends ModelePDFFactures
 					return 0;
 				}
 			}
-
 			if (file_exists($dir))
 			{
 				// Add pdfgeneration hook
@@ -352,7 +349,7 @@ class pdf_metro_invoice extends ModelePDFFactures
                 $heightforinfotot = 50 + (4 * $nbpayments); // Height reserved to output the info and total part and payment part
 		        $heightforfreetext = (isset($conf->global->MAIN_PDF_FREETEXT_HEIGHT) ? $conf->global->MAIN_PDF_FREETEXT_HEIGHT : 5); // Height reserved to output the free text on last page
 	            $heightforfooter = $this->marge_basse + 8; // Height reserved to output the footer (value include bottom margin)
-	            if ($conf->global->MAIN_GENERATE_DOCUMENTS_SHOW_FOOT_DETAILS > 0) $heightforfooter += 6;
+	            if (!empty($conf->global->MAIN_GENERATE_DOCUMENTS_SHOW_FOOT_DETAILS)) $heightforfooter += 6;
 
                 if (class_exists('TCPDF'))
                 {
@@ -362,11 +359,14 @@ class pdf_metro_invoice extends ModelePDFFactures
                 $pdf->SetFont(pdf_getPDFFont($outputlangs));
 
                 // Set path to the background PDF File
-                if (!empty($conf->global->MAIN_ADD_PDF_BACKGROUND))
-                {
-                	$pagecount = $pdf->setSourceFile($conf->mycompany->multidir_output[$object->entity].'/'.$conf->global->MAIN_ADD_PDF_BACKGROUND);
-				    $tplidx = $pdf->importPage(1);
-                }
+				if (!empty($conf->global->MAIN_ADD_PDF_BACKGROUND)) {
+					$logodir = $conf->mycompany->dir_output;
+					if (!empty($conf->mycompany->multidir_output[$object->entity])) {
+						$logodir = $conf->mycompany->multidir_output[$object->entity];
+					}
+					$pagecount = $pdf->setSourceFile($logodir.'/'.$conf->global->MAIN_ADD_PDF_BACKGROUND);
+					$tplidx = $pdf->importPage(1);
+				}
 
 				$pdf->Open();
 				$pagenb = 0;
@@ -379,8 +379,32 @@ class pdf_metro_invoice extends ModelePDFFactures
 				$pdf->SetKeyWords($outputlangs->convToOutputCharset($object->ref)." ".$outputlangs->transnoentities("PdfInvoiceTitle")." ".$outputlangs->convToOutputCharset($object->thirdparty->name));
 				if (!empty($conf->global->MAIN_DISABLE_PDF_COMPRESSION)) $pdf->SetCompression(false);
 
-				$pdf->SetMargins($this->marge_gauche, $this->marge_haute, $this->marge_droite); // Left, Top, Right
+				// Set certificate
+				$cert = empty($user->conf->CERTIFICATE_CRT) ? '' : $user->conf->CERTIFICATE_CRT;
+				// If user has no certificate, we try to take the company one
+				if (!$cert) {
+					$cert = empty($conf->global->CERTIFICATE_CRT) ? '' : $conf->global->CERTIFICATE_CRT;
+				}
+				// If a certificate is found
+				if ($cert) {
+					$info = array(
+						'Name' => $this->emetteur->name,
+						'Location' => getCountry($this->emetteur->country_code, 0),
+						'Reason' => 'INVOICE',
+						'ContactInfo' => $this->emetteur->email
+					);
+					$pdf->setSignature($cert, $cert, $this->emetteur->name, '', 2, $info);
+				}
 
+				$pdf->SetMargins($this->marge_gauche, $this->marge_haute, $this->marge_droite); // Left, Top, Right
+				// Set $this->atleastonediscount if you have at least one discount
+				for ($i = 0; $i < $nblines; $i++)
+				{
+					if ($object->lines[$i]->remise_percent)
+					{
+						$this->atleastonediscount++;
+					}
+				}
 				if (empty($this->atleastonediscount))    // retreive space not used by discount
 				{
 				    $delta = ($this->posxprogress - $this->posxdiscount);
@@ -422,7 +446,7 @@ class pdf_metro_invoice extends ModelePDFFactures
 				$tab_top_newpage = (empty($conf->global->MAIN_PDF_DONOTREPEAT_HEAD) ? 42 + $top_shift : 10);
 
 				// Incoterm
-				if ($conf->incoterm->enabled)
+				if (!empty($conf->incoterm->enabled))
 				{
 					$desc_incoterms = $object->getIncotermsForPDF();
 					if ($desc_incoterms)
@@ -455,12 +479,18 @@ class pdf_metro_invoice extends ModelePDFFactures
 						if (!empty($salerepobj->signature)) $notetoshow = dol_concatdesc($notetoshow, $salerepobj->signature);
 					}
 				}
+				// Extrafields in note
+				$extranote = $this->getExtrafieldsInHtml($object, $outputlangs);
+				if (!empty($extranote)) {
+					$notetoshow = dol_concatdesc($notetoshow, $extranote);
+				}
 				if ($notetoshow)
 				{
 					$tab_top -= 2;
 
 					$substitutionarray = pdf_getSubstitutionArray($outputlangs, null, $object);
 					complete_substitutions_array($substitutionarray, $outputlangs, $object);
+
 					$notetoshow = make_substitutions($notetoshow, $substitutionarray, $outputlangs);
 					$notetoshow = convertBackOfficeMediasLinksToPublicLinks($notetoshow);
 
@@ -479,7 +509,7 @@ class pdf_metro_invoice extends ModelePDFFactures
 				$iniY = $tab_top + 7;
 				$curY = $tab_top + 7;
 				$nexY = $tab_top + 7;
-
+				
 				// Loop on each lines
 				for ($i = 0; $i < $nblines; $i++)
 				{
@@ -510,10 +540,9 @@ class pdf_metro_invoice extends ModelePDFFactures
 						$curY = $tab_top_newpage;
 
 						// Allows data in the first page if description is long enough to break in multiples pages
-						if(!empty($conf->global->MAIN_PDF_DATA_ON_FIRST_PAGE))
+						if (!empty($conf->global->MAIN_PDF_DATA_ON_FIRST_PAGE))
 							$showpricebeforepagebreak = 1;
-						else
-							$showpricebeforepagebreak = 0;
+						else $showpricebeforepagebreak = 0;
 					}
 
 					if (isset($imglinesize['width']) && isset($imglinesize['height']))
@@ -528,7 +557,10 @@ class pdf_metro_invoice extends ModelePDFFactures
 					$curX = $this->posxdesc - 1;
 
 					$pdf->startTransaction();
-					pdf_writelinedesc($pdf, $object, $i, $outputlangs, $this->posxpicture - $curX - $progress_width, 3, $curX, $curY, $hideref = 1, $hidedesc);
+					// Hide Rereference from description
+					$hideref = 1;
+					$hidedesc = 1;
+					pdf_writelinedesc($pdf, $object, $i, $outputlangs, $this->posxpicture - $curX - $progress_width - 18, 3, $curX, $curY, $hideref, $hidedesc);
 					
 					$pageposafter = $pdf->getPage();
 					if ($pageposafter > $pageposbefore)	// There is a pagebreak
@@ -537,7 +569,7 @@ class pdf_metro_invoice extends ModelePDFFactures
 						$pageposafter = $pageposbefore;
 						//print $pageposafter.'-'.$pageposbefore;exit;
 						$pdf->setPageOrientation('', 1, $heightforfooter); // The only function to edit the bottom margin of current page to set it.
-						pdf_writelinedesc($pdf, $object, $i, $outputlangs, $this->posxpicture - $curX - $progress_width, 3, $curX, $curY, $hideref = 1, $hidedesc);
+						pdf_writelinedesc($pdf, $object, $i, $outputlangs, $this->posxpicture - $curX - $progress_width - 18, 3, $curX, $curY, $hideref, $hidedesc);
 						$pageposafter = $pdf->getPage();
 						$posyafter = $pdf->GetY();
 						//var_dump($posyafter); var_dump(($this->page_hauteur - ($heightforfooter+$heightforfreetext+$heightforinfotot))); exit;
@@ -550,19 +582,15 @@ class pdf_metro_invoice extends ModelePDFFactures
 								if (empty($conf->global->MAIN_PDF_DONOTREPEAT_HEAD)) $this->_pagehead($pdf, $object, 0, $outputlangs);
 								$pdf->setPage($pageposafter + 1);
 							}
-						}
-						else
-						{
+						} else {
 							// We found a page break
 
 							// Allows data in the first page if description is long enough to break in multiples pages
 							if(!empty($conf->global->MAIN_PDF_DATA_ON_FIRST_PAGE))
 								$showpricebeforepagebreak = 1;
-							else
-								$showpricebeforepagebreak = 0;
+							else $showpricebeforepagebreak = 0;
 						}
-					}
-					else	// No pagebreak
+					} else	// No pagebreak
 					{
 						$pdf->commitTransaction();
 					}
@@ -579,8 +607,9 @@ class pdf_metro_invoice extends ModelePDFFactures
 						$pdf->setPage($pageposafter); $curY = $tab_top_newpage;
 					}
 
-					//Product Ref.
 					$pdf->SetFont('', '', $default_font_size - 1); // We reposition the default font
+					
+					//Product Ref.
 					$ref = $object->lines[$i]->ref;
 					$pdf->SetXY($this->posxRef, $curY);
 					$pdf->MultiCell($this->posxdesc - $this->posxRef, 4, $ref, 0, 'L');
@@ -719,9 +748,7 @@ class pdf_metro_invoice extends ModelePDFFactures
 						if ($pagenb == 1)
 						{
 							$this->_tableau($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforfooter, 0, $outputlangs, 0, 1, $object->multicurrency_code);
-						}
-						else
-						{
+						} else {
 							$this->_tableau($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforfooter, 0, $outputlangs, 1, 1, $object->multicurrency_code);
 						}
 						$this->_pagefoot($pdf, $object, $outputlangs, 1);
@@ -735,9 +762,7 @@ class pdf_metro_invoice extends ModelePDFFactures
 						if ($pagenb == 1)
 						{
 							$this->_tableau($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforfooter, 0, $outputlangs, 0, 1, $object->multicurrency_code);
-						}
-						else
-						{
+						} else {
 							$this->_tableau($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforfooter, 0, $outputlangs, 1, 1, $object->multicurrency_code);
 						}
 						$this->_pagefoot($pdf, $object, $outputlangs, 1);
@@ -754,9 +779,7 @@ class pdf_metro_invoice extends ModelePDFFactures
 				{
 					$this->_tableau($pdf, $tab_top, $this->page_hauteur - $tab_top - $heightforinfotot - $heightforfreetext - $heightforfooter, 0, $outputlangs, 0, 0, $object->multicurrency_code);
 					$bottomlasttab = $this->page_hauteur - $heightforinfotot - $heightforfreetext - $heightforfooter + 1;
-				}
-				else
-				{
+				} else {
 					$this->_tableau($pdf, $tab_top_newpage, $this->page_hauteur - $tab_top_newpage - $heightforinfotot - $heightforfreetext - $heightforfooter, 0, $outputlangs, 1, 0, $object->multicurrency_code);
 					$bottomlasttab = $this->page_hauteur - $heightforinfotot - $heightforfreetext - $heightforfooter + 1;
 				}
@@ -772,13 +795,13 @@ class pdf_metro_invoice extends ModelePDFFactures
 				{
 					$posy = $this->_tableau_versements($pdf, $object, $posy, $outputlangs, $heightforfooter);
 				}
-
+				
 				// Pagefoot
 				$this->_pagefoot($pdf, $object, $outputlangs);
 				if (method_exists($pdf, 'AliasNbPages')) $pdf->AliasNbPages();
-
+				
 				$pdf->Close();
-
+				
 				$pdf->Output($file, 'F');
 
 				// Add pdfgeneration hook
@@ -796,17 +819,13 @@ class pdf_metro_invoice extends ModelePDFFactures
 				@chmod($file, octdec($conf->global->MAIN_UMASK));
 
 				$this->result = array('fullpath'=>$file);
-
+				
 				return 1; // No error
-			}
-			else
-			{
+			} else {
 				$this->error = $langs->transnoentities("ErrorCanNotCreateDir", $dir);
 				return 0;
 			}
-		}
-		else
-		{
+		} else {
 			$this->error = $langs->transnoentities("ErrorConstantNotDefined", "FAC_OUTPUTDIR");
 			return 0;
 		}
@@ -835,7 +854,7 @@ class pdf_metro_invoice extends ModelePDFFactures
 
 		$current_page = $pdf->getPage();
         $tab3_posx = 120;
-		$tab3_top = $posy + 8;
+		$tab3_top = $posy + 25;
 		$tab3_width = 80;
 		$tab3_height = 4;
 		if ($this->page_largeur < 210) // To work with US executive format
@@ -880,32 +899,27 @@ class pdf_metro_invoice extends ModelePDFFactures
 
 				$obj = $this->db->fetch_object($resql);
 
-				if(!$obj->type == 0){
-					if ($obj->type == 2) $text = $outputlangs->transnoentities("CreditNote");
-					elseif ($obj->type == 3) $text = $outputlangs->transnoentities("Deposit");
-					elseif ($obj->type == 0) $text = $outputlangs->transnoentities("ExcessReceived");
-					else $text = $outputlangs->transnoentities("UnknownType");
-	
-					$invoice->fetch($obj->fk_facture_source);
-	
-					$pdf->SetXY($tab3_posx, $tab3_top + $y);
-					$pdf->MultiCell(20, 3, dol_print_date($this->db->jdate($obj->datef), 'day', false, $outputlangs, true), 0, 'L', 0);
-					$pdf->SetXY($tab3_posx + 21, $tab3_top + $y);
-					$pdf->MultiCell(20, 3, "$" . price(($conf->multicurrency->enabled && $object->multicurrency_tx != 1) ? $obj->multicurrency_amount_ttc : $obj->amount_ttc, 0, $outputlangs), 0, 'L', 0);
-					$pdf->SetXY($tab3_posx + 40, $tab3_top + $y);
-					$pdf->MultiCell(20, 3, $text, 0, 'L', 0);
-					$pdf->SetXY($tab3_posx + 58, $tab3_top + $y);
-					$pdf->MultiCell(20, 3, $invoice->ref, 0, 'L', 0);
-	
-					$pdf->line($tab3_posx, $tab3_top + $y + 3, $tab3_posx + $tab3_width, $tab3_top + $y + 3);
-				}
-				
+				if ($obj->type == 2) $text = $outputlangs->transnoentities("CreditNote");
+				elseif ($obj->type == 3) $text = $outputlangs->transnoentities("Deposit");
+				elseif ($obj->type == 0) $text = $outputlangs->transnoentities("ExcessReceived");
+				else $text = $outputlangs->transnoentities("UnknownType");
+
+				$invoice->fetch($obj->fk_facture_source);
+
+				$pdf->SetXY($tab3_posx, $tab3_top + $y);
+				$pdf->MultiCell(20, 3, dol_print_date($this->db->jdate($obj->datef), 'day', false, $outputlangs, true), 0, 'L', 0);
+				$pdf->SetXY($tab3_posx + 21, $tab3_top + $y);
+				$pdf->MultiCell(20, 3, price((!empty($conf->multicurrency->enabled) && $object->multicurrency_tx != 1) ? $obj->multicurrency_amount_ttc : $obj->amount_ttc, 0, $outputlangs), 0, 'L', 0);
+				$pdf->SetXY($tab3_posx + 40, $tab3_top + $y);
+				$pdf->MultiCell(20, 3, $text, 0, 'L', 0);
+				$pdf->SetXY($tab3_posx + 58, $tab3_top + $y);
+				$pdf->MultiCell(20, 3, $invoice->ref, 0, 'L', 0);
+
+				$pdf->line($tab3_posx, $tab3_top + $y + 3, $tab3_posx + $tab3_width, $tab3_top + $y + 3);
 
 				$i++;
 			}
-		}
-		else
-		{
+		} else {
 			$this->error = $this->db->lasterror();
 			return -1;
 		}
@@ -1294,9 +1308,7 @@ class pdf_metro_invoice extends ModelePDFFactures
 			if (!empty($conf->global->MAIN_GENERATE_DOCUMENTS_WITHOUT_VAT_IFNULL) && $tvaisnull)
 			{
 				// Nothing to do
-			}
-			else
-			{
+			} else {
 			    // FIXME amount of vat not supported with multicurrency
 
 				//Local tax 1 before VAT
