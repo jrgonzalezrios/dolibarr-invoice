@@ -239,6 +239,9 @@ class pdf_metro_invoice extends ModelePDFFactures
 		//Invoice is in pcs
 		$this->isInPcs = $object->array_options['options_inpcs'];
 
+		//Invoice Ref Type
+		$this->refType = $object->array_options['options_reftype'];
+
 		//Total Discount if discount
 		$this->totalDiscountAmount = 0;
 		//Total Sale amount
@@ -510,6 +513,34 @@ class pdf_metro_invoice extends ModelePDFFactures
 				$curY = $tab_top + 7;
 				$nexY = $tab_top + 7;
 				
+				// Loop on each lines, check for long ref
+				$longestCharRef = 0;
+				
+				for ($i = 0; $i < $nblines; $i++) {
+					$product = new Product($this->db);
+					$product->fetch($object->lines[$i]->fk_product);
+					
+					$ref = $object->lines[$i]->ref;
+					
+					if($this->refType == 'upc' && !empty($product->array_options['options_upc'])) {
+						$ref = $product->array_options['options_upc'];
+					}
+					
+					$refCharacters = strlen($ref);
+					
+					if($refCharacters > $longestCharRef){
+						$longestCharRef = $refCharacters;
+					}
+				}
+				
+				$longestCharRef = $longestCharRef * 2; // Approximate width of a character in points
+				
+				// Define position of columns
+				$this->posxRef = $this->marge_gauche;
+				
+				$this->posxdesc = $this->posxRef + ($longestCharRef >= 32 ? $longestCharRef : 32);
+				// var_dump($this->posxdesc);
+				// die();
 				// Loop on each lines
 				for ($i = 0; $i < $nblines; $i++)
 				{
@@ -553,13 +584,14 @@ class pdf_metro_invoice extends ModelePDFFactures
 						$posYAfterImage = $curY + $imglinesize['height'];
 					}
 
-					// Description of product line
+					// Description of product line, starting at length of longestCharRef
 					$curX = $this->posxdesc - 1;
 
 					$pdf->startTransaction();
 					// Hide Rereference from description
 					$hideref = 1;
 					$hidedesc = 1;
+					
 					pdf_writelinedesc($pdf, $object, $i, $outputlangs, $this->posxpicture - $curX - $progress_width - 18, 3, $curX, $curY, $hideref, $hidedesc);
 					
 					$pageposafter = $pdf->getPage();
@@ -611,9 +643,16 @@ class pdf_metro_invoice extends ModelePDFFactures
 					
 					//Product Ref.
 					$ref = $object->lines[$i]->ref;
+					
+					if($this->refType == 'upc' && !empty($product->array_options['options_upc'])) {
+						$product = new Product($this->db);
+						$product->fetch($object->lines[$i]->fk_product);
+						$ref = $product->array_options['options_upc'];
+					}
+					
 					$pdf->SetXY($this->posxRef, $curY);
-					$pdf->MultiCell($this->posxdesc - $this->posxRef, 4, $ref, 0, 'L');
-
+					$pdf->MultiCell($this->posxdesc - $this->posxRef, 4, $ref, 0, 'L', 1, '', '', '', false, 3, false);
+					
 					// VAT Rate
 					if (empty($conf->global->MAIN_GENERATE_DOCUMENTS_WITHOUT_VAT) && empty($conf->global->MAIN_GENERATE_DOCUMENTS_WITHOUT_VAT_COLUMN))
 					{
@@ -1606,7 +1645,8 @@ class pdf_metro_invoice extends ModelePDFFactures
 		if (empty($hidetop))
 		{
 			$pdf->SetXY($this->posxRef - 1, $tab_top + 1);
-			$pdf->MultiCell($this->posxdesc - $this->posxRef - 1, 2, "Ref.", '', 'C');
+
+			$pdf->MultiCell($this->posxdesc - $this->posxRef - 1, 2, $this->refType == 'upc'? "UPC" : "Ref.", '', 'C');
 		}
 
 		if (empty($conf->global->MAIN_GENERATE_DOCUMENTS_WITHOUT_VAT) && empty($conf->global->MAIN_GENERATE_DOCUMENTS_WITHOUT_VAT_COLUMN))
